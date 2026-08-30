@@ -1,0 +1,5 @@
+# This is an example projects.yaml. Feel free to add more to this to register more projects.
+# Note that this needs to be in the current working directory [i.e. alongside the JAR].
+namespace:project:
+  showRoomList: true
+  maxPlayers: 2
