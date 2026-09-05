@@ -3,6 +3,8 @@ package wilpam.wilp2p;
 import org.java_websocket.WebSocket;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import wilpam.json.deserialize.Deserializer;
 import wilpam.json.obj.JsonArray;
 import wilpam.json.obj.JsonBool;
@@ -27,6 +29,8 @@ public class Wilp2pServer extends WebSocketServer {
     private static final String PROJECT_IDENTIFIER_PATTERN = "[a-z0-9_]+:[a-z0-9_]+";
     private static final String ROOM_ID_PATTERN = "[A-Za-z0-9]+";
     private static final String ROOM_SEPARATOR = "\u0000";
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Wilp2pServer.class);
 
     private static final JsonString TYPE_KEY = new JsonString("type");
     private static final JsonString DATA_KEY = new JsonString("data");
@@ -113,9 +117,16 @@ public class Wilp2pServer extends WebSocketServer {
     private final Object lock = new Object();
     private final Map<WebSocket, ClientState> clients = new LinkedHashMap<>();
     private final Map<String, Room> rooms = new LinkedHashMap<>();
+    private final ProjectPropertiesLookup projectProperties = new ProjectPropertiesLookup();
 
     public Wilp2pServer(int port) {
         super(new InetSocketAddress(port));
+    }
+
+    @Override
+    public void stop() throws InterruptedException {
+        projectProperties.close();
+        super.stop();
     }
 
     @Override
@@ -190,13 +201,12 @@ public class Wilp2pServer extends WebSocketServer {
 
     @Override
     public void onError(WebSocket conn, Exception ex) {
-        // TODO: fix me
-        ex.printStackTrace();
+        LOGGER.warn("An error occurred in the server", ex);
     }
 
     @Override
     public void onStart() {
-        System.out.println("Server started!");
+        LOGGER.info("Server started");
         setConnectionLostTimeout(100);
     }
 
@@ -232,7 +242,7 @@ public class Wilp2pServer extends WebSocketServer {
         int separator = id.indexOf(':');
         ProjectIdentifier identifier = new ProjectIdentifier(
                 id.substring(0, separator), id.substring(separator + 1));
-        if (!identifier.isRegistered()) {
+        if (!projectProperties.isRegistered(identifier)) {
             state.conn.close(1003, String.format("'%s' is not a registered project identifier", id));
             return;
         }
@@ -241,7 +251,7 @@ public class Wilp2pServer extends WebSocketServer {
 
         Map<String, JsonType> fields = new LinkedHashMap<>();
         fields.put("version", new JsonString(PROTOCOL_VERSION));
-        if (identifier.properties().showRoomList()) {
+        if (projectProperties.properties(identifier).showRoomList()) {
             fields.put("rooms", roomsArray(id));
         }
         sendTyped(state.conn, "start_reply", dataOf(fields));
@@ -279,11 +289,11 @@ public class Wilp2pServer extends WebSocketServer {
         sendTyped(state.conn, "room_created", dataOf(singleField("id", new JsonNumber(String.valueOf(clientId)))));
     }
 
-    private static int projectMaxPlayers(String projectId) {
+    private int projectMaxPlayers(String projectId) {
         int separator = projectId.indexOf(':');
         ProjectIdentifier identifier = new ProjectIdentifier(
                 projectId.substring(0, separator), projectId.substring(separator + 1));
-        return identifier.properties().maxPlayers();
+        return projectProperties.properties(identifier).maxPlayers();
     }
 
     private void handleJoinRoom(ClientState state, JsonObject data) {
